@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { resolveEntity, resolveEntityFromCandidate, getLanguage } from './lib/entityResolver.js';
   import { buildGraph } from './lib/graphBuilder.js';
+  import NeuralGraph from './lib/NeuralGraph.svelte';
 
   let searchQuery = '';
   let loading = false;
@@ -27,6 +28,7 @@
       if (result.needsDisambiguation) {
         candidates = result.candidates;
         console.log('Désambiguïsation nécessaire:', candidates);
+        entity = null;
       } else {
         entity = result;
         console.log('Entity resolved:', entity);
@@ -66,6 +68,17 @@
 
   function handleKeydown(e) {
     if (e.key === 'Enter') handleSearch();
+  }
+
+    // Fonction pour gérer le clic sur un neurone du graphe
+  async function handleNodeClick(event) {
+    const { id, label } = event.detail;
+    console.log("Navigation neuronale vers :", label);
+    
+    // Si c'est un lien Wikipedia (wiki:Titre), on nettoie
+    const cleanQuery = label;
+    searchQuery = cleanQuery;
+    handleSearch(); // On relance une recherche complète
   }
 </script>
 
@@ -114,7 +127,6 @@
     {#if entity}
       <!-- Reste du code identique -->
       <div class="result">
-        <h2>Entité Résolue</h2>
         <div class="entity-card">
           <h3>{entity.name}</h3>
           <p class="wikidata-id">Wikidata: {entity.id}</p>
@@ -122,15 +134,6 @@
           {#if entity.description}
             <p class="description">{entity.description}</p>
           {/if}
-
-          <div class="sources">
-            <h4>Sources disponibles:</h4>
-            <ul>
-              {#each Object.keys(entity.sources) as source}
-                <li>{source}</li>
-              {/each}
-            </ul>
-          </div>
 
           {#if entity.sources.wikipedia?.extract}
             <div class="extract">
@@ -307,27 +310,27 @@
               {/if}
             </div>
           {/if}
+          <div class="sources">
+            <h4>Sources disponibles:</h4>
+            <ul>
+              {#each Object.keys(entity.sources) as source}
+                <li>{source}</li>
+              {/each}
+            </ul>
+          </div>
         </div>
       </div>
     {/if}
 
     {#if graph}
-      <div class="graph-preview">
-        <h2>Graphe Construit</h2>
-        <p>Nœuds: {graph.nodes.length} | Liens: {graph.edges.length}</p>
+      <section class="neural-section">
+        <h2>Navigation Neuronale</h2>
+        <NeuralGraph {graph} on:selectNode={handleNodeClick} />
         
-        <div class="nodes-list">
-          <h4>Nœuds connectés:</h4>
-          <ul>
-            {#each graph.nodes.slice(0, 10) as node}
-              <li>{node.label} ({node.type})</li>
-            {/each}
-            {#if graph.nodes.length > 10}
-              <li>... et {graph.nodes.length - 10} autres</li>
-            {/if}
-          </ul>
+        <div class="graph-info">
+          <small>Astuce : Cliquez sur un neurone pour explorer ses connexions.</small>
         </div>
-      </div>
+      </section>
     {/if}
   </main>
 </div>
