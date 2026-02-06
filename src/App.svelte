@@ -10,28 +10,32 @@
   let graph = null;
   let error = null;
   let candidates = null; // ← Nouveau
+  let history = [];
 
   async function handleSearch() {
     if (!searchQuery.trim()) return;
     
     loading = true;
     error = null;
-    entity = null;
-    graph = null;
-    candidates = null; // ← Reset
-
+    candidates = null; // On cache les anciens candidats
+    // Note: on ne reset pas 'entity' et 'graph' tout de suite pour éviter un flash blanc
+    
     try {
       console.log('Resolving entity:', searchQuery);
       const result = await resolveEntity(searchQuery);
       
-      // Vérifier si c'est une désambiguïsation
       if (result.needsDisambiguation) {
+        // Cas 1 : Plusieurs choix possibles
         candidates = result.candidates;
-        console.log('Désambiguïsation nécessaire:', candidates);
         entity = null;
+        graph = null;
+        console.log('Désambiguïsation nécessaire:', candidates);
       } else {
+        // Cas 2 : Entité trouvée directement
         entity = result;
-        console.log('Entity resolved:', entity);
+        
+        // --- MISE À JOUR DE L'HISTORIQUE ---
+        updateHistory(entity.id, entity.name);
 
         console.log('Building graph...');
         graph = await buildGraph(entity, 1);
@@ -41,6 +45,8 @@
     } catch (err) {
       error = err.message;
       console.error('Error:', err);
+      entity = null;
+      graph = null;
     } finally {
       loading = false;
     }
@@ -54,7 +60,7 @@
     try {
       entity = await resolveEntityFromCandidate(candidate.title, candidate.wikidataId);
       console.log('Entity resolved:', entity);
-
+      updateHistory(entity.id, entity.name);
       graph = await buildGraph(entity, 1);
       console.log('Graph built:', graph);
 
@@ -80,6 +86,23 @@
     searchQuery = cleanQuery;
     handleSearch(); // On relance une recherche complète
   }
+
+    // Fonction pour mettre à jour l'historique sans doublons consécutifs
+  function updateHistory(id, name) {
+    // Si l'entité est déjà dans l'historique, on coupe l'historique à ce niveau (retour en arrière)
+    const index = history.findIndex(item => item.id === id);
+    if (index !== -1) {
+      history = history.slice(0, index + 1);
+    } else {
+      history = [...history, { id, name }];
+    }
+  }
+
+  // Fonction pour cliquer sur un élément du breadcrumb
+  function navigateBack(item) {
+    searchQuery = item.name;
+    handleSearch();
+  }
 </script>
 
 <div class="app">
@@ -101,6 +124,18 @@
   </header>
 
   <main>
+    {#if history.length > 0}
+      <nav class="breadcrumb">
+        {#each history as item, i}
+          <button class="breadcrumb-item" on:click={() => navigateBack(item)}>
+            {item.name}
+          </button>
+          {#if i < history.length - 1}
+            <span class="separator">›</span>
+          {/if}
+        {/each}
+      </nav>
+    {/if}
     {#if loading}
       <div class="status">Chargement...</div>
     {/if}
@@ -581,5 +616,41 @@
   .link-btn:hover {
     background: var(--accent);
     color: white;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border-radius: 20px;
+    font-size: 0.9rem;
+    overflow-x: auto;
+  }
+
+  .breadcrumb-item {
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .breadcrumb-item:hover {
+    text-decoration: underline;
+  }
+
+  .breadcrumb-item:last-child {
+    color: var(--text-primary);
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .separator {
+    color: var(--text-secondary);
   }
 </style>

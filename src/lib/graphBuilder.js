@@ -83,11 +83,16 @@ export async function buildGraph(centerEntity, depth = 1, maxNodesPerLevel = 20)
     .filter(node => node.id.startsWith('Q'))
     .map(node => node.id);
 
+  // À la fin de buildGraph dans graphBuilder.js
   if (qidsToTranslate.length > 0) {
-    const labelsMap = await fetchWikidataLabels(qidsToTranslate);
+    const metaMap = await fetchEntityMetadata(qidsToTranslate);
     graph.nodes.forEach(node => {
-      if (labelsMap[node.id]) {
-        node.label = labelsMap[node.id];
+      if (metaMap[node.id]) {
+        node.label = metaMap[node.id].label;
+        // On n'écrase l'image que si le nœud n'en a pas déjà (le centre en a déjà une)
+        if (!node.thumbnail) {
+          node.thumbnail = metaMap[node.id].imageUrl;
+        }
       }
     });
   }
@@ -232,16 +237,16 @@ export async function resolveConnectedEntities(entityIds, maxConcurrent = 5) {
 }
 
 /**
- * Récupère les noms (labels) pour une liste d'IDs Wikidata
+ * Récupère les noms et images pour une liste d'IDs Wikidata
  */
-async function fetchWikidataLabels(ids) {
+async function fetchEntityMetadata(ids) {
   if (ids.length === 0) return {};
   
-  const lang = 'fr'; // Ou récupère CURRENT_LANG
+  const lang = 'fr';
   const params = new URLSearchParams({
     action: 'wbgetentities',
     ids: ids.join('|'),
-    props: 'labels',
+    props: 'labels|claims', // On demande les labels ET les claims (pour l'image P18)
     languages: lang,
     format: 'json',
     origin: '*'
@@ -250,16 +255,29 @@ async function fetchWikidataLabels(ids) {
   try {
     const response = await fetch(`https://www.wikidata.org/w/api.php?${params}`);
     const data = await response.json();
-    const labels = {};
+    const metadata = {};
     
     if (data.entities) {
       for (const id of ids) {
-        labels[id] = data.entities[id]?.labels?.[lang]?.value || id;
+        const entity = data.entities[id];
+        
+        // 1. Récupérer le label
+        const label = entity.labels?.[lang]?.value || id;
+        
+        // 2. Récupérer l'image (P18)
+        let imageUrl = null;
+        const p18 = entity.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+        if (p18) {
+          // Formatage de l'URL pour obtenir une miniature de Wikimedia Commons
+          imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(p18)}?width=100`;
+        }
+
+        metadata[id] = { label, imageUrl };
       }
     }
-    return labels;
+    return metadata;
   } catch (e) {
-    console.error("Erreur lors de la récupération des labels:", e);
+    console.error("Erreur métadonnées:", e);
     return {};
   }
 }
