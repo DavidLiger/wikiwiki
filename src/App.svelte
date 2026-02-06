@@ -11,6 +11,9 @@
   let error = null;
   let candidates = null; // ← Nouveau
   let history = [];
+  let isSearchOpen = false;
+  let autocompleteResults = [];
+  let debounceTimer;
 
   async function handleSearch() {
     if (!searchQuery.trim()) return;
@@ -143,45 +146,96 @@
         loading = false;
       }
     }
+  
+  // Fonction pour basculer la barre de recherche
+  function toggleSearch() {
+    isSearchOpen = !isSearchOpen;
+    if (!isSearchOpen) {
+      autocompleteResults = [];
+      searchQuery = "";
+    }
+  }
+
+  // Autocomplétion avec "Debounce" pour ne pas surcharger l'API
+  async function handleInput() {
+    clearTimeout(debounceTimer);
+    if (searchQuery.length < 2) {
+      autocompleteResults = [];
+      return;
+    }
+
+    debounceTimer = setTimeout(async () => {
+      try {
+        // On réutilise ta fonction searchWikipedia
+        const results = await searchWikipedia(searchQuery);
+        autocompleteResults = results;
+      } catch (err) {
+        console.error("Autocomp error:", err);
+      }
+    }, 300); // Attend 300ms après la fin de la frappe
+  }
+
+  // Sélection d'une suggestion
+  function selectSuggestion(title) {
+    searchQuery = title;
+    autocompleteResults = [];
+    isSearchOpen = false;
+    handleSearch();
+  }
 </script>
 
 <div class="app">
-  <header>
-    <h1>WIKIWIKI</h1>
-    <div class="lang-info">🌍 Wikipedia: {getLanguage().toUpperCase()}</div>
-    <div class="search-bar">
-      <input 
-        type="text" 
-        bind:value={searchQuery}
-        on:keydown={handleKeydown}
-        placeholder="Rechercher un sujet (ex: Sidney Bechet, Jazz, Quartz...)"
-        disabled={loading}
-      />
-      <button on:click={handleSearch} disabled={loading || !searchQuery.trim()}>
-        {loading ? '⏳' : '🔍'}
+  <header class="app-header">
+    <div class="header-top">
+      <div class="brand-zone">
+        <span class="icon-book">📖</span>
+        <h1 class="logo">wikiwiki</h1>
+      </div>
+      <button class="search-toggle" on:click={toggleSearch}>
+        {isSearchOpen ? '✕' : '🔍'}
       </button>
     </div>
-  </header>
 
-  <main>
-    {#if history.length > 0}
-      <!-- Dans le HTML de App.svelte -->
-      <nav class="breadcrumb">
+    {#if isSearchOpen}
+      <div class="search-overlay">
+        <div class="search-input-wrapper">
+          <input 
+            type="text" 
+            bind:value={searchQuery}
+            on:input={handleInput}
+            on:keydown={handleKeydown}
+            placeholder="Rechercher..."
+            autoFocus
+          />
+        </div>
+        
+        {#if autocompleteResults.length > 0}
+          <ul class="autocomplete-list">
+            {#each autocompleteResults as res}
+              <li>
+                <button on:click={() => selectSuggestion(res)}>
+                  🔍 {res}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+
+    {#if history.length > 0 && !isSearchOpen}
+      <nav class="breadcrumb-mobile">
         {#each history as item, i}
-          <button 
-            class="breadcrumb-item" 
-            class:active={i === history.length - 1}
-            on:click={() => navigateBack(item)}
-            disabled={loading || i === history.length - 1}
-          >
+          <button class:active={i === history.length-1} on:click={() => navigateBack(item)}>
             {item.name}
           </button>
-          {#if i < history.length - 1}
-            <span class="separator">›</span>
-          {/if}
+          {#if i < history.length - 1}<span>›</span>{/if}
         {/each}
       </nav>
     {/if}
+  </header>
+
+  <main>
     {#if loading}
       <div class="status">Chargement...</div>
     {/if}
@@ -417,6 +471,121 @@
 </div>
 
 <style>
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-color: #0b0e14;
+  }
+
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(11, 14, 20, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid #2c3e50;
+    padding: 10px 15px;
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 50px;
+  }
+
+  .brand-zone {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin: 0;
+    text-transform: lowercase;
+    color: #4a9eff;
+  }
+
+  .icon-book { font-size: 1.5rem; }
+
+  .search-toggle {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 5px;
+  }
+
+  .search-overlay {
+    position: absolute;
+    top: 60px;
+    left: 0;
+    width: 100%;
+    background: #1a1f2c;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    padding: 15px;
+    box-sizing: border-box;
+  }
+
+  .search-input-wrapper input {
+    width: 100%;
+    padding: 12px 15px;
+    background: #0b0e14;
+    border: 1px solid #4a9eff;
+    border-radius: 8px;
+    color: white;
+    font-size: 1rem;
+    outline: none;
+  }
+
+  .autocomplete-list {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0 0;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .autocomplete-list li button {
+    width: 100%;
+    text-align: left;
+    padding: 12px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid #2c3e50;
+    color: #e0e0e0;
+    font-size: 0.95rem;
+  }
+
+  /* Breadcrumb Mobile */
+  .breadcrumb-mobile {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 10px 0 5px 0;
+    font-size: 0.8rem;
+    scrollbar-width: none;
+  }
+  .breadcrumb-mobile::-webkit-scrollbar { display: none; }
+  
+  .breadcrumb-mobile button {
+    background: #1a1f2c;
+    border: none;
+    color: #4a9eff;
+    padding: 5px 12px;
+    border-radius: 15px;
+    white-space: nowrap;
+  }
+  
+  .breadcrumb-mobile button.active {
+    background: #4a9eff;
+    color: white;
+  }
   .app {
     width: 100%;
     height: 100%;

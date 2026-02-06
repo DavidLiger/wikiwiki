@@ -6,8 +6,8 @@
 
   const dispatch = createEventDispatcher();
   let svgElement;
-  let width = 800;
-  let height = 600;
+  let width = window.innerWidth;
+  let height = window.innerHeight * 0.6;
 
   // 1. DÉCLARATION DE LA SIMULATION (en dehors pour persistance)
   let simulation = d3.forceSimulation()
