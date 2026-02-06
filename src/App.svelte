@@ -76,15 +76,32 @@
     if (e.key === 'Enter') handleSearch();
   }
 
-    // Fonction pour gérer le clic sur un neurone du graphe
   async function handleNodeClick(event) {
     const { id, label } = event.detail;
-    console.log("Navigation neuronale vers :", label);
     
-    // Si c'est un lien Wikipedia (wiki:Titre), on nettoie
-    const cleanQuery = label;
-    searchQuery = cleanQuery;
-    handleSearch(); // On relance une recherche complète
+    // On ne met PAS loading = true tout de suite pour ne pas tout bloquer
+    // On lance la résolution en arrière-plan
+    try {
+      // 1. On récupère les données de la nouvelle entité (pour la Card)
+      // Si c'est un Qid, on résout par ID, sinon par titre
+      const newEntity = id.startsWith('Q') 
+        ? await resolveEntityFromCandidate(label, id)
+        : await resolveEntity(label);
+
+      // 2. On met à jour l'entité (La Card va changer instantanément)
+      entity = newEntity;
+      updateHistory(entity.id, entity.name);
+
+      // 3. On génère le nouveau graphe
+      const newGraph = await buildGraph(entity, 1);
+      
+      // 4. On met à jour la variable 'graph'
+      // Svelte va passer cette nouvelle valeur au composant NeuralGraph
+      graph = newGraph;
+
+    } catch (err) {
+      error = err.message;
+    }
   }
 
     // Fonction pour mettre à jour l'historique sans doublons consécutifs
@@ -99,10 +116,33 @@
   }
 
   // Fonction pour cliquer sur un élément du breadcrumb
-  function navigateBack(item) {
-    searchQuery = item.name;
-    handleSearch();
-  }
+  async function navigateBack(item) {
+      if (loading) return;
+      
+      loading = true;
+      error = null;
+      candidates = null; // On s'assure de cacher les suggestions
+
+      try {
+        console.log('Retour historique vers :', item.name, item.id);
+        
+        // On utilise l'ID précis pour éviter la désambiguïsation
+        const result = await resolveEntityFromCandidate(item.name, item.id);
+        
+        entity = result;
+        // updateHistory va détecter que l'ID existe déjà et "couper" le breadcrumb au bon endroit
+        updateHistory(entity.id, entity.name);
+
+        console.log('Mise à jour du graphe...');
+        graph = await buildGraph(entity, 1);
+        
+      } catch (err) {
+        error = err.message;
+        console.error('Erreur retour arrière:', err);
+      } finally {
+        loading = false;
+      }
+    }
 </script>
 
 <div class="app">
@@ -125,9 +165,15 @@
 
   <main>
     {#if history.length > 0}
+      <!-- Dans le HTML de App.svelte -->
       <nav class="breadcrumb">
         {#each history as item, i}
-          <button class="breadcrumb-item" on:click={() => navigateBack(item)}>
+          <button 
+            class="breadcrumb-item" 
+            class:active={i === history.length - 1}
+            on:click={() => navigateBack(item)}
+            disabled={loading || i === history.length - 1}
+          >
             {item.name}
           </button>
           {#if i < history.length - 1}
@@ -451,6 +497,10 @@
     padding: 1.5rem;
     margin-bottom: 1rem;
   }
+  .entity-card {
+    transition: all 0.5s ease-in-out;
+    /* Optionnel : ajouter une animation d'entrée pour le texte */
+  }
 
   .entity-card h3 {
     font-size: 1.5rem;
@@ -649,7 +699,16 @@
     cursor: default;
     pointer-events: none;
   }
-
+  .breadcrumb-item.active {
+    color: var(--text-primary);
+    font-weight: bold;
+    cursor: default;
+    opacity: 0.8;
+  }
+  
+  .breadcrumb-item:disabled {
+    pointer-events: none;
+  }
   .separator {
     color: var(--text-secondary);
   }

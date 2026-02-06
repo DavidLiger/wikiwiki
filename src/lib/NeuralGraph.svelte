@@ -2,119 +2,131 @@
   import { onMount, createEventDispatcher } from 'svelte';
   import * as d3 from 'd3';
 
-  export let graph; // Les données { nodes, edges }
+  export let graph;
 
   const dispatch = createEventDispatcher();
   let svgElement;
   let width = 800;
   let height = 600;
 
-  // On relance la simulation dès que les données 'graph' changent
+  // 1. DÉCLARATION DE LA SIMULATION (en dehors pour persistance)
+  let simulation = d3.forceSimulation()
+    .force("link", d3.forceLink().id(d => d.id).distance(d => 150 - (d.value * 30)))
+    .force("charge", d3.forceManyBody().strength(-400))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide().radius(60));
+
+  // Réactivité Svelte
   $: if (graph && svgElement) {
     updateGraph();
   }
 
   function updateGraph() {
     const svg = d3.select(svgElement);
-    svg.selectAll("*").remove(); // Nettoyage
+    
+    if (svg.selectAll(".links").empty()) {
+      svg.append("g").attr("class", "links");
+      svg.append("g").attr("class", "nodes");
+    }
 
-    // 1. Définition des forces
-    const simulation = d3.forceSimulation(graph.nodes)
-      .force("link", d3.forceLink(graph.edges)
-        .id(d => d.id)
-        .distance(d => 150 - (d.value * 30))) // Plus le score est haut, plus c'est proche
-      .force("charge", d3.forceManyBody().strength(-400))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(60));
-
-    // 2. Création des liens (axones)
-    const link = svg.append("g")
-      .attr("class", "links")
+    // --- LIENS ---
+    const link = svg.select(".links")
       .selectAll("line")
-      .data(graph.edges)
-      .enter().append("line")
-      .attr("stroke", "#4a9eff")
-      .attr("stroke-opacity", 0.4)
-      .attr("stroke-width", d => d.value * 1.5); // Épaisseur selon score
+      .data(graph.edges, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
 
-    // 3. Création des nœuds (neurones)
-    const node = svg.append("g")
-      .attr("class", "nodes")
-      .selectAll("g")
-      .data(graph.nodes)
-      .enter().append("g")
+    link.exit().transition().duration(500).attr("stroke-opacity", 0).remove();
+
+    const linkEnter = link.enter().append("line")
+      .attr("stroke", "#4a9eff")
+      .attr("stroke-opacity", 0)
+      .attr("stroke-width", d => d.value * 1.5);
+    
+    const allLinks = linkEnter.merge(link);
+    allLinks.transition().duration(500).attr("stroke-opacity", 0.4);
+
+    // --- NŒUDS ---
+    const node = svg.select(".nodes")
+      .selectAll(".node-group")
+      .data(graph.nodes, d => d.id);
+
+    node.exit().transition().duration(500)
+      .attr("opacity", 0)
+      .attr("transform", "scale(0)")
+      .remove();
+
+    const nodeEnter = node.enter().append("g")
       .attr("class", "node-group")
-      .on("click", (event, d) => {
-        dispatch('selectNode', { id: d.id, label: d.label });
-      })
+      .on("click", (event, d) => dispatch('selectNode', { id: d.id, label: d.label }))
       .call(d3.drag()
         .on("start", dragstarted)
         .on("drag", dragged)
         .on("end", dragended));
 
-    // Masque circulaire pour l'image
-    const defs = svg.append("defs");
-    node.each(function(d) {
-      defs.append("clipPath")
-        .attr("id", `clip-${d.index}`)
-        .append("circle")
-        .attr("r", d.isCenter ? 35 : 25);
-    });
-
-    // Cercle de fond (halo)
-    node.append("circle")
-      .attr("r", d => d.isCenter ? 38 : 28)
+    nodeEnter.append("circle")
+      .attr("class", "node-halo")
       .attr("fill", "none")
-      .attr("stroke", d => d.isCenter ? "#4a9eff" : "#2c3e50")
-      .attr("stroke-width", 2)
-      .attr("class", "node-halo");
+      .attr("stroke-width", 2);
 
-    // Image du nœud
-    node.append("image")
-      .attr("xlink:href", d => d.thumbnail || 'https://www.wikidata.org/static/images/icons/Wikipedia-logo-v2.png')
-      .attr("clip-path", d => `url(#clip-${d.index})`)
-      .attr("x", d => d.isCenter ? -35 : -25)
-      .attr("y", d => d.isCenter ? -35 : -25)
-      .attr("width", d => d.isCenter ? 70 : 50)
-      .attr("height", d => d.isCenter ? 70 : 50)
+    nodeEnter.append("image")
       .attr("preserveAspectRatio", "xMidYMid slice");
 
-    // Label texte
-    node.append("text")
-      .text(d => d.label)
-      .attr("dy", d => d.isCenter ? 55 : 45)
-      .attr("text-anchor", "middle")
+    nodeEnter.append("text")
       .attr("fill", "white")
-      .style("font-size", d => d.isCenter ? "14px" : "11px")
-      .style("font-weight", d => d.isCenter ? "bold" : "normal")
-      .style("text-shadow", "0 2px 4px rgba(0,0,0,0.8)");
+      .attr("text-anchor", "middle");
 
-    // 4. Animation (Tick)
+    const allNodes = nodeEnter.merge(node);
+
+    allNodes.select(".node-halo")
+      .transition().duration(800)
+      .attr("r", d => d.isCenter ? 40 : 28)
+      .attr("stroke", d => d.isCenter ? "#4a9eff" : "#2c3e50");
+
+    allNodes.select("image")
+      .transition().duration(800)
+      .attr("x", d => d.isCenter ? -40 : -28)
+      .attr("y", d => d.isCenter ? -40 : -28)
+      .attr("width", d => d.isCenter ? 80 : 56)
+      .attr("height", d => d.isCenter ? 80 : 56)
+      .attr("xlink:href", d => d.thumbnail || 'https://www.wikidata.org/static/images/icons/Wikipedia-logo-v2.png');
+
+    allNodes.select("text")
+      .transition().duration(800)
+      .text(d => d.label)
+      .attr("dy", d => d.isCenter ? 60 : 45)
+      .style("font-size", d => d.isCenter ? "14px" : "11px");
+
+    // --- MISE À JOUR PHYSIQUE ---
+    simulation.nodes(graph.nodes);
+    simulation.force("link").links(graph.edges);
+    simulation.alpha(0.5).restart();
+
     simulation.on("tick", () => {
-      link
+      allLinks
         .attr("x1", d => d.source.x)
         .attr("y1", d => d.source.y)
         .attr("x2", d => d.target.x)
         .attr("y2", d => d.target.y);
 
-      node.attr("transform", d => `translate(${d.x},${d.y})`);
+      allNodes.attr("transform", d => `translate(${d.x},${d.y})`);
     });
+  }
 
-    // Fonctions de drag
-    function dragstarted(event) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      event.subject.fx = event.subject.x;
-      event.subject.fy = event.subject.y;
-    }
-    function dragged(event) {
-      event.subject.fx = event.x;
-      event.subject.fy = event.y;
-    }
-    function dragended(event) {
-      if (!event.active) simulation.alphaTarget(0);
-      event.subject.fx = null;
-      event.subject.fy = null;
-    }
+  // 2. FONCTIONS DE DRAG (re-ajoutées ici)
+  function dragstarted(event) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    event.subject.fx = event.subject.x;
+    event.subject.fy = event.subject.y;
+  }
+
+  function dragged(event) {
+    event.subject.fx = event.x;
+    event.subject.fy = event.y;
+  }
+
+  function dragended(event) {
+    if (!event.active) simulation.alphaTarget(0);
+    event.subject.fx = null;
+    event.subject.fy = null;
   }
 </script>
 
